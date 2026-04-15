@@ -11,37 +11,51 @@ Given a Playwright locator expression, check how many elements it matches in the
 
 ## Arguments
 
-- `$ARGUMENTS` — the locator expression, written as a chain starting from `page`. Examples:
-  - `getByRole('button', { name: 'Submit', exact: true })`
-  - `getByTestId('submit-button')`
-  - `getByRole('heading', { level: 6, name: 'Settings' }).locator('xpath=following-sibling::span[1]').getByRole('checkbox')`
+- `$ARGUMENTS` — a full Playwright locator expression that starts with `page.` (paste it exactly as it appears in your Page Object). Examples:
+  - `page.getByRole('button', { name: 'Submit', exact: true })`
+  - `page.getByTestId('submit-button')`
+  - `page.getByRole('heading', { level: 6, name: 'Settings' }).locator('xpath=following-sibling::span[1]').getByRole('checkbox')`
 
 ## Steps
 
-1. **Verify Chrome CDP is reachable** at `http://127.0.0.1:9222`. If not, instruct the user to launch Chrome with debugging (see the skill's Prerequisites section).
+1. **Chrome auto-start.** If a CDP-using tool has already been invoked in the session (e.g. `/dom-grab`), Chrome is already up. Otherwise kick off any of the plugin's tools first (they all auto-launch Chrome) or manually run `${CLAUDE_PLUGIN_ROOT}/tools/start-chrome-debug.bat`. Quick sanity: `curl -s http://127.0.0.1:9222/json/version`.
 
-2. **Require that `playwright` is installed somewhere reachable** — `connectOverCDP` lives in the `playwright` package, not `@playwright/test`. If the current directory has no `node_modules/playwright`, try `npx -y -p playwright node -e '...'`.
+2. **Pick how to invoke `playwright`** — the `connectOverCDP` API lives in the `playwright` package (not `@playwright/test`).
+   - If the **current working directory** has `node_modules/playwright` installed, invoke with plain `node -e "..."` — it's faster and avoids re-downloading the package.
+   - Otherwise fall back to `npx -y -p playwright node -e "..."`.
 
-3. **Run the check** — substitute `$ARGUMENTS` into the locator chain:
+   Quick check:
    ```bash
-   npx -y -p playwright node -e "
+   test -d node_modules/playwright && echo LOCAL || echo NPX
+   ```
+
+3. **Run the check** — substitute the user's `$ARGUMENTS` in directly (it already starts with `page.`, do NOT add another `page.` prefix):
+
+   Local-install form:
+   ```bash
+   node -e "
    const { chromium } = require('playwright');
    (async () => {
      const browser = await chromium.connectOverCDP('http://127.0.0.1:9222');
      const ctx = browser.contexts()[0];
      const page = ctx.pages()[0];
-     const loc = page.$ARGUMENTS;
+     const loc = $ARGUMENTS;
      const count = await loc.count();
      console.log('URL:     ', page.url());
      console.log('Matches: ', count);
      if (count >= 1) {
        const first = loc.first();
-       console.log('First:   ', await first.evaluate(el => el.outerHTML.slice(0, 200)));
+       console.log('First:   ', (await first.evaluate(el => el.outerHTML)).slice(0, 200));
        try { console.log('Visible:', await first.isVisible()); } catch {}
      }
      await browser.close();
    })().catch(e => { console.error(e.message); process.exit(1); });
    "
+   ```
+
+   Fallback form (no local playwright):
+   ```bash
+   npx -y -p playwright node -e "<same script as above>"
    ```
 
 4. **Interpret the result for the user**:

@@ -12,6 +12,7 @@
 import { parseArgs } from 'util';
 import * as fs from 'fs';
 import * as path from 'path';
+import { ensureChrome } from './ensure-chrome';
 
 // ---------------------------------------------------------------------------
 // CLI argument parsing
@@ -263,11 +264,19 @@ function kbSize(str: string): string {
   return (str.length / 1024).toFixed(1) + ' KB';
 }
 
+function writeFileEnsureDir(filePath: string, content: string): void {
+  const dir = path.dirname(path.resolve(filePath));
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.resolve(filePath), content, 'utf-8');
+}
+
 // ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
 async function main() {
   console.log(`Connecting to Chrome at http://${HOST}:${PORT} ...\n`);
+
+  await ensureChrome({ host: HOST, port: PORT });
 
   if (DELAY_SECS > 0) await countdown(DELAY_SECS);
 
@@ -291,7 +300,7 @@ async function main() {
     const cleanHtml = cleanResult.value;
     const pct = (((rawSizeResult.value - cleanHtml.length) / rawSizeResult.value) * 100).toFixed(0);
 
-    fs.writeFileSync(path.resolve(DOM_OUTPUT), cleanHtml, 'utf-8');
+    writeFileEnsureDir(DOM_OUTPUT, cleanHtml);
     console.log(`  ✓ ${path.resolve(DOM_OUTPUT)} (${kbSize(cleanHtml)}, reduced from ${rawKb} KB — ${pct}% removed)`);
   }
 
@@ -303,7 +312,7 @@ async function main() {
     );
     const ariaYaml = buildAriaYaml(result.nodes);
 
-    fs.writeFileSync(path.resolve(ARIA_OUTPUT), ariaYaml, 'utf-8');
+    writeFileEnsureDir(ARIA_OUTPUT, ariaYaml);
     console.log(`  ✓ ${path.resolve(ARIA_OUTPUT)} (${kbSize(ariaYaml)})`);
   }
 

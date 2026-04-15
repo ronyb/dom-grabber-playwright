@@ -15,11 +15,7 @@ Capture a snapshot of the page currently open in the user's debug Chrome session
 
 ## Steps
 
-1. **Verify Chrome CDP is reachable:**
-   ```bash
-   curl -s http://127.0.0.1:9222/json/version
-   ```
-   If it fails, tell the user to launch Chrome with debugging first — on Windows, point them at `${CLAUDE_PLUGIN_ROOT}/tools/start-chrome-debug.bat`; on Linux/macOS, show them the flag-based command.
+1. **Chrome is auto-started if needed.** `dom-grabber.ts` calls `ensureChrome()` on startup — if CDP isn't reachable on `127.0.0.1:9222`, it launches Chrome with the right flags and waits up to 15s. You usually don't need to do anything. If it fails (e.g. Chrome not installed at a standard path), fall back to telling the user to run `${CLAUDE_PLUGIN_ROOT}/tools/start-chrome-debug.bat` (Windows) or the equivalent flag-based command.
 
 2. **Run the capture** — both DOM and ARIA by default:
    ```bash

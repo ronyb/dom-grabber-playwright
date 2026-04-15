@@ -16,22 +16,29 @@ Drive the Chrome tab at `http://127.0.0.1:9222` to a new URL via CDP's `Page.nav
 
 ## Steps
 
-1. **Verify Chrome CDP is reachable:**
+1. **Chrome auto-start.** The plugin's `active-tab.ts` / `cdp-do.ts` helpers call `ensureChrome()` which auto-launches Chrome with CDP if it isn't already running. If you want to avoid the `curl` probe, run `${CLAUDE_PLUGIN_ROOT}/tools/active-tab.ts` directly — it handles auto-start and prints the WS URL. Otherwise:
    ```bash
    curl -s http://127.0.0.1:9222/json/version
    ```
-   If it fails, instruct the user to launch Chrome with debugging first (see the skill's Prerequisites section). Do not proceed.
+   If this fails and auto-start hasn't been triggered yet, run `${CLAUDE_PLUGIN_ROOT}/tools/start-chrome-debug.bat` (Windows) or the equivalent Linux/macOS command. Do not proceed until CDP is reachable.
 
-2. **Find the active tab's WebSocket URL:**
+2. **Find the active tab's WebSocket URL.** Prefer the helper:
+   ```bash
+   WS=$(npx tsx "${CLAUDE_PLUGIN_ROOT}/tools/active-tab.ts")
+   ```
+   Or the raw approach:
    ```bash
    curl -s http://127.0.0.1:9222/json
    ```
    Pick the first entry with `type: "page"` whose `url` does NOT start with `chrome://` or `devtools://`. Read its `webSocketDebuggerUrl`.
 
 3. **Drive `Page.navigate` via a Node one-liner:**
+
+   Note: do NOT name the URL variable `URL` — it shadows Node's built-in `URL` constructor and causes `new WebSocket(URL)` to throw `TypeError: URL is not a constructor`. Use `TARGET_URL` (or anything that isn't a Node global).
+
    ```bash
    node -e "
-   const WS = process.argv[1], URL = process.argv[2];
+   const WS = process.argv[1], TARGET_URL = process.argv[2];
    const ws = new WebSocket(WS);
    let currentId = 0;
    const send = (method, params = {}) => new Promise((resolve, reject) => {
@@ -45,14 +52,14 @@ Drive the Chrome tab at `http://127.0.0.1:9222` to a new URL via CDP's `Page.nav
    });
    ws.onopen = async () => {
      await send('Page.enable');
-     await send('Page.navigate', { url: URL });
+     await send('Page.navigate', { url: TARGET_URL });
      await new Promise(r => {
        const h = ev => { const m = JSON.parse(ev.data); if (m.method === 'Page.frameStoppedLoading') { ws.removeEventListener('message', h); r(); } };
        ws.addEventListener('message', h);
      });
      setTimeout(() => ws.close(), ${2:-500});
    };
-   ws.onclose = () => { console.log('Navigated to', URL); process.exit(0); };
+   ws.onclose = () => { console.log('Navigated to', TARGET_URL); process.exit(0); };
    ws.onerror = (e) => { console.error('WS error:', e.message || e); process.exit(1); };
    " "<WS_URL_FROM_STEP_2>" "$1"
    ```

@@ -22,8 +22,10 @@ Turn a live page into reliable Playwright code by capturing what the browser act
 - **Chrome installed.**
 - **`npx tsx`** available — installs on demand via `npx`, or globally with `npm i -g tsx`.
 
-The plugin ships the CLI and launcher under `${CLAUDE_PLUGIN_ROOT}/tools/`:
-- `dom-grabber.ts` — the capture CLI.
+The plugin ships these helpers under `${CLAUDE_PLUGIN_ROOT}/tools/`:
+- `dom-grabber.ts` — the capture CLI (DOM + ARIA snapshots).
+- `cdp-do.ts` — action driver over CDP: fill (reads secrets from env, not argv), click, click-text, press, eval, wait, count. Use this any time you need to drive the page to a specific state before capturing — it avoids the nested-template-literal escape hell of inlining values into `node -e "..."`.
+- `active-tab.ts` — prints the first real tab's WebSocket debugger URL (or full JSON with `--json`). Handy for `WS=$(... active-tab.ts)` shell chains.
 - `start-chrome-debug.bat` — Windows launcher that starts Chrome with CDP enabled.
 
 Linux/macOS equivalent of the launcher:
@@ -36,6 +38,12 @@ chromium --remote-debugging-port=9222 --user-data-dir=/tmp/chrome-debug
 ## Workflow
 
 ### 1. Start Chrome with CDP
+
+**Usually you don't need to do anything.** `dom-grabber.ts`, `cdp-do.ts`, and `active-tab.ts` all call `ensureChrome()` at startup: if CDP isn't reachable on `127.0.0.1:9222`, they launch Chrome (Windows: `start-chrome-debug.bat`; macOS/Linux: equivalent flags) and wait up to 15s for it to come up. Persistent profile dir (`%TEMP%\chrome-debug` / `/tmp/chrome-debug`) means auth state survives across sessions.
+
+Opt out by setting `NO_AUTO_CHROME=1` — then the tools fail fast if CDP is down instead of auto-launching.
+
+Manual launch (only if auto-start fails):
 
 **Windows:**
 ```bash
@@ -51,21 +59,22 @@ Verify: `curl -s http://127.0.0.1:9222/json/version` should return a JSON blob w
 
 ### 2. Navigate to the target page
 
-Either the user opens it manually, or drive it via CDP. To navigate an existing tab:
+Either the user opens it manually, or drive it via CDP. The plugin ships `/dom-navigate <url>` as a one-shot for this. Under the hood it resolves the active tab's WebSocket URL (via `active-tab.ts`) and sends `Page.navigate`.
+
+If you're scripting it yourself, DO NOT name the URL variable `URL` in Node — it shadows the built-in `URL` global and breaks `new WebSocket(...)`. Use `TARGET_URL` or similar.
+
+### 2b. Drive the page to a specific state (optional)
+
+If the capture needs the page in a particular state (logged in, a modal open, a tab switched), use `cdp-do.ts` instead of hand-rolling a `node -e` one-liner. Credentials stay in env variables, not argv:
 
 ```bash
-# Get the tab's webSocketDebuggerUrl from /json
-curl -s http://127.0.0.1:9222/json
-
-# Then send Page.navigate via a one-liner:
-node -e "
-const ws = new WebSocket('ws://127.0.0.1:9222/devtools/page/<TAB_ID>');
-ws.onopen = () => ws.send(JSON.stringify({ id: 1, method: 'Page.navigate', params: { url: 'https://example.com' } }));
-ws.onmessage = (e) => { console.log(e.data); ws.close(); };
-"
+BO_EMAIL='user@example.com' BO_PASS='hunter2'
+npx tsx ${CLAUDE_PLUGIN_ROOT}/tools/cdp-do.ts fill '[data-testid="login.email"]'    BO_EMAIL
+npx tsx ${CLAUDE_PLUGIN_ROOT}/tools/cdp-do.ts fill '[data-testid="login.password"]' BO_PASS
+npx tsx ${CLAUDE_PLUGIN_ROOT}/tools/cdp-do.ts click-text button 'Log in'
 ```
 
-Wait ~1s and re-query `/json` to confirm the new URL/title.
+This sidesteps the three-layer escaping trap you hit when embedding JS-in-shell-in-another-JS.
 
 ### 3. Capture DOM + ARIA
 
@@ -98,7 +107,15 @@ Each line has the shape:
 - <role> "<accessible-name>" [props]:
 ```
 
-That maps **directly** to `page.getByRole('<role>', { name: '<accessible-name>' })` — no guessing needed.
+That **usually** maps to `page.getByRole('<role>', { name: '<accessible-name>' })`.
+
+**Caveat — the mapping is not 100% reliable.** Some authors write elements like `<p role="alert">Settings saved</p>` where the visible text is a descendant `StaticText` node in the ARIA tree, not the element's computed accessible name. In those cases `getByRole('alert', { name: 'Settings saved' })` returns 0 matches even though the ARIA dump shows the text. When this happens, fall back to:
+
+```ts
+page.getByRole('alert').filter({ hasText: 'Settings saved' })
+```
+
+This anchors on the semantic role and uses the visible text as a content filter — the combination of the two is usually specific enough. Always run `/verify-locator` to confirm, especially for MUI Snackbar/Alert, ARIA live regions on `<p>`/`<div>`, and custom components that don't compute `aria-labelledby` / `aria-label`.
 
 ### 5. Cross-check the sanitized DOM
 
@@ -178,6 +195,16 @@ If the page changes (modal opens, tab switches, results load, language toggles),
 
 Reusing a snapshot from earlier in the session is a common failure mode. If the user navigated, toggled language, hovered something, or otherwise changed state since your last capture, the old `.aria.yaml` is a lie. **When in doubt, re-capture.**
 
+### role+name lookup fails for some "text-only" alerts/labels
+
+See the caveat in step 4 above. Symptom: ARIA YAML clearly shows `- alert "My message"` but `getByRole('alert', { name: 'My message' })` matches zero elements. Cause: the element's computed accessible name is empty (e.g., `<p role="alert">text</p>` where text is a child node, not an `aria-label`). Fix: use `.filter({ hasText: '...' })` on the role locator. Run `/verify-locator` to confirm match count before committing.
+
+### Ephemeral UI (snackbars, toasts) auto-dismisses between action and capture
+
+MUI Snackbar, Mantine Notification, Ant Design message, etc. often disappear after 3–6 seconds. A common failure pattern: perform the action, then run `/dom-grab` or `/verify-locator` — by the time the CDP connection opens, the alert is gone and you get zero matches. Two options:
+1. Use `/drive-and-grab` (combined action + capture in one CDP session — no gap for auto-dismiss).
+2. Keep the action and capture physically close in the same script/flow, and re-trigger the action if you need to re-verify later.
+
 ### Hidden/ignored nodes are skipped
 
 `dom-grabber.ts` filters out `ignored: true` AX nodes and reparents visible children to the nearest visible ancestor. If you expect an element in the YAML but don't see it, it may be `aria-hidden` or offscreen — verify in the DevTools Accessibility panel.
@@ -215,6 +242,7 @@ Key debug moment: first run failed because `{ name: 'Go' }` matched both the sub
 - **`/dom-grab [name]`** — capture a fresh DOM + ARIA snapshot and summarize what was found (useful interactive entry point during a session).
 - **`/dom-navigate <url>`** — drive the active debug-Chrome tab to a new URL via CDP without losing auth state.
 - **`/verify-locator <expr>`** — sanity-check a Playwright locator against the live Chrome tab without running a full test.
+- **`/drive-and-grab <action-script>`** — perform an action (click, hover, submit) and capture DOM + ARIA in the same CDP session, before any ephemeral UI has a chance to auto-dismiss.
 
 ## Specific tasks
 
