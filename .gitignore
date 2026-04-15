@@ -1,0 +1,19 @@
+# Captured snapshots are throwaway — never commit them
+*.html
+*.aria.yaml
+
+# Node
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Editor / OS
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# But DO keep the CLI itself and any .html/.yaml intentionally shipped in docs
+!skills/**/*.html
+!skills/**/*.aria.yaml

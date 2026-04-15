@@ -1,0 +1,22 @@
+{
+  "name": "dom-grabber-playwright",
+  "version": "1.1.0",
+  "description": "Capture DOM + ARIA snapshots from a live Chrome session via CDP and build Playwright artifacts — tests, page objects, or locator updates — from what the browser actually renders.",
+  "author": {
+    "name": "Rony Byalsky"
+  },
+  "keywords": [
+    "playwright",
+    "dom",
+    "aria",
+    "snapshot",
+    "page-object",
+    "locator",
+    "cdp",
+    "chrome",
+    "automation",
+    "testing"
+  ],
+  "skills": "./skills/",
+  "commands": "./commands/"
+}
