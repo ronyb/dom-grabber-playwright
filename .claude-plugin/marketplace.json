@@ -1,0 +1,26 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "dom-grabber-playwright-marketplace",
+  "description": "Local marketplace hosting the dom-grabber-playwright plugin.",
+  "owner": {
+    "name": "Rony Byalsky"
+  },
+  "plugins": [
+    {
+      "name": "dom-grabber-playwright",
+      "description": "Capture DOM + ARIA snapshots from a live Chrome session via CDP and build Playwright artifacts — tests, page objects, or locator updates — from what the browser actually renders.",
+      "category": "testing",
+      "source": "./",
+      "keywords": [
+        "playwright",
+        "dom",
+        "aria",
+        "snapshot",
+        "page-object",
+        "locator",
+        "cdp",
+        "chrome"
+      ]
+    }
+  ]
+}
